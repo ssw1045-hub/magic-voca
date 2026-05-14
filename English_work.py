@@ -7,251 +7,174 @@ import io
 from datetime import datetime
 
 # ==========================================
-# 1. 완벽한 UI/UX 인테리어 (입체 버튼 & 플래시카드)
+# 1. UI/UX 디자인 (고급스러운 핑크 & 보라)
 # ==========================================
 st.set_page_config(page_title="고은이의 마법 단어장", layout="centered")
 st.markdown("""
 <style>
-    /* 전체 배경 */
     .stApp { background-color: #FFF0F5 !important; }
-    
-    /* 폰트 색상 및 굵기 */
-    h1, h2, h3, p, span, div, label, li, td, th { 
-        color: #4B0082 !important; 
-        font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif !important; 
-        font-weight: bold !important; 
-    }
-    
-    /* 🚀 메인 버튼 입체 디자인 */
-    .stButton>button { 
-        width: 100%; border-radius: 15px; 
-        background: linear-gradient(135deg, #9370DB, #8A2BE2) !important; 
-        color: white !important; font-weight: bold; font-size: 16px; 
-        height: 3.5em; border: none; 
-        box-shadow: 0px 4px 6px rgba(0,0,0,0.2); transition: all 0.2s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0px 6px 12px rgba(0,0,0,0.3);
-    }
-    
-    /* 🃏 고급 플래시카드 디자인 */
-    .flashcard { 
-        background: white; padding: 60px 20px; border-radius: 30px; 
-        border: 4px solid #FFB6C1; text-align: center; margin-bottom: 25px; 
-        box-shadow: 0px 10px 20px rgba(255,182,193,0.4); 
-    }
-    
-    /* 입력창 및 탭 스타일 */
-    input { color: #000 !important; font-size: 18px !important; text-align: center; }
-    .stTabs [data-baseweb="tab"] p { font-size: 18px; font-weight: bold; }
+    h1, h2, h3, p, span, div, label, li, td, th { color: #4B0082 !important; font-family: 'Apple SD Gothic Neo', sans-serif !important; font-weight: bold !important; }
+    .stButton>button { width: 100%; border-radius: 15px; background: linear-gradient(135deg, #9370DB, #8A2BE2) !important; color: white !important; font-weight: bold; height: 3.5em; box-shadow: 0px 4px 6px rgba(0,0,0,0.2); }
+    .flashcard { background: white; padding: 50px 20px; border-radius: 30px; border: 4px solid #FFB6C1; text-align: center; margin-bottom: 25px; box-shadow: 0px 10px 20px rgba(255,182,193,0.4); }
+    .stCheckbox label { color: #4B0082 !important; font-size: 16px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💖 고은이의 마법 단어장 PRO")
+st.title("💖 고은이의 마법 단어장 V11")
 
 # ==========================================
-# 2. 데이터 불러오기 및 기본 세팅
+# 2. 데이터 로드 및 초기화
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 try:
     df = conn.read(ttl=0)
-    
-    # 필수 기둥(컬럼) 확인
-    required_cols = ['영어', '한글', '상태', '학교오답', '등록일']
+    # 필수 기둥: 영어, 한글, 상태, 학교오답, 시험용, 등록일
+    required_cols = ['영어', '한글', '상태', '학교오답', '시험용', '등록일']
     for col in required_cols:
-        if col not in df.columns:
-            df[col] = ""
-            
+        if col not in df.columns: df[col] = ""
     df['상태'] = pd.to_numeric(df['상태'], errors='coerce').fillna(0).astype(int)
-    
-    # 빈 등록일은 오늘 날짜로 채우기
     today_str = datetime.today().strftime('%Y-%m-%d')
     df['등록일'] = df['등록일'].fillna(today_str).replace("", today_str)
-    
-    # 아직 다 못 외운 단어들만 모으기
-    unmastered = df[df['상태'] < 4].reset_index(drop=True)
-except Exception as e:
-    st.error("🚨 구글 시트 연결 에러! 공유 설정과 주소를 확인해주세요.")
+except:
+    st.error("🚨 시트 연결 실패! 설정을 확인해주세요.")
     st.stop()
 
 # ==========================================
-# 3. 대치동 7일 누적 + 주차별 스와이프 알고리즘
+# 3. 누적 복습 알고리즘 (30개씩 누적)
 # ==========================================
+unmastered = df[df['상태'] < 4].reset_index(drop=True)
 if not unmastered.empty:
-    # 최초 등록일을 기준으로 몇 일차인지 계산 (오늘부터 시작이면 1일차)
-    start_date_str = unmastered['등록일'].min()
-    try:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        days_passed = (datetime.today() - start_date).days
-        if days_passed < 0: days_passed = 0
-    except:
-        days_passed = 0
-        
-    day_number = days_passed + 1
-    week = (day_number - 1) // 7 + 1
-    day_of_week = (day_number - 1) % 7 + 1 # 1(월요일 역할) ~ 7(일요일 역할)
-    
-    # 주차별 누적 로직 (1주 = 210개 기준)
-    prev_week_start = max(0, (week - 2) * 210) # 1주차일땐 0, 2주차일땐 0, 3주차일땐 210
-    
-    curr_week_start = (week - 1) * 210
-    curr_week_end = curr_week_start + (day_of_week * 30) # 매일 30개씩 추가
-    
-    # 7일차(일요일)는 이번주 210개 전체 복습
-    if day_of_week == 7:
-        curr_week_end = curr_week_start + 210
-        
-    # 최종 오늘 공부할 타겟 범위 (이전 주차 + 이번 주 누적)
-    today_targets = unmastered.iloc[prev_week_start:curr_week_end]
-    
-    if day_of_week < 7:
-        msg = f"오늘은 {week}주차 {day_of_week}일째! 총 {len(today_targets)}개 누적 학습일이에요 📚"
-    else:
-        msg = f"오늘은 {week}주차 총복습일! ({len(today_targets)}개) 시험을 쳐볼까요? 👑"
+    start_date = datetime.strptime(unmastered['등록일'].min(), '%Y-%m-%d')
+    days_passed = (datetime.today() - start_date).days
+    day_number = max(1, days_passed + 1)
+    # 7일 누적 로직 (30개씩 추가)
+    curr_limit = ((day_number - 1) % 7 + 1) * 30
+    # 2주차 스와이프 (이전주 210개 포함)
+    start_idx = max(0, ((day_number - 1) // 7 - 1) * 210)
+    today_targets = unmastered.iloc[start_idx : start_idx + curr_limit + 180] # 2주 단위 포함
 else:
     today_targets = pd.DataFrame()
-    msg = "단어장에 공부할 단어가 없어요! 단어를 추가해주세요."
-
-st.info(f"📅 {msg}")
 
 # ==========================================
-# 4. 직관적인 4탭 구성
+# 4. 4대 핵심 탭 구성
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["📖 깜빡이 학습", "🎯 마법 퀴즈", "➕ 단어 추가", "🔒 비밀의 방"])
+tab1, tab2, tab3, tab4 = st.tabs(["👀 깜빡이 학습", "🎯 마법 퀴즈", "➕ 단어 추가", "🔒 비밀의 방"])
 
-# --- 탭 1: 깜빡이 학습 (수동 제어) ---
+# --- 탭 1: 깜빡이 학습 ---
 with tab1:
-    if len(today_targets) > 0:
+    if not today_targets.empty:
         if 'f_idx' not in st.session_state: st.session_state.f_idx = 0
-        idx = st.session_state.f_idx % len(today_targets)
-        row = today_targets.iloc[idx]
+        row = today_targets.iloc[st.session_state.f_idx % len(today_targets)]
         
-        badge = "🚨 학교 오답!" if str(row['학교오답']) == "O" else "✨ 집중!"
+        # 강조 표시
+        marks = []
+        if str(row['학교오답']) == "O": marks.append("🚨학교오답")
+        if str(row['시험용']) == "O": marks.append("📝시험단어")
+        badge = " / ".join(marks) if marks else "✨ 일반학습"
         
-        st.markdown(f"<div class='flashcard'><p style='color:#FF4500; font-size:20px; margin:0;'>{badge}</p><h1 style='font-size:80px; margin:10px 0;'>{row['영어']}</h1></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='flashcard'><p style='color:#FF4500;'>{badge}</p><h1 style='font-size:70px;'>{row['영어']}</h1></div>", unsafe_allow_html=True)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔊 발음 듣기", key=f"audio_{idx}"):
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔊 발음"):
                 tts = gTTS(text=str(row['영어']), lang='en')
-                fp = io.BytesIO()
-                tts.write_to_fp(fp)
-                st.audio(fp, format='audio/mp3')
-        with col2:
-            if st.button("💡 뜻 보기", key=f"mean_{idx}"):
-                st.success(f"정답: {row['한글']}")
-                
-        if st.button("➡️ 다음 단어로 넘어가기", key=f"next_{idx}"):
+                fp = io.BytesIO(); tts.write_to_fp(fp); st.audio(fp, format='audio/mp3')
+        with c2:
+            if st.button("💡 뜻 확인"): st.success(f"정답: {row['한글']}")
+        if st.button("➡️ 다음 단어로 이동"):
             st.session_state.f_idx += 1
             st.rerun()
     else:
-        st.success("오늘 분량을 모두 마스터했어요! 👑")
+        st.success("오늘의 학습 분량을 모두 마쳤습니다! 👑")
 
-# --- 탭 2: 마법 퀴즈 (답답함 완전 해소!) ---
+# --- 탭 2: 마법 퀴즈 (무한 반복 & 기습 질문) ---
 with tab2:
-    if len(today_targets) > 0:
+    st.write("### 🎯 실전 테스트")
+    # [베테랑 아이디어] 무한 복습 모드 스위치
+    review_mode = st.toggle("🔄 무한 복습 모드 (다 외운 단어도 포함해서 무작위 시험!)")
+    
+    quiz_pool = df if review_mode else today_targets
+    
+    if not quiz_pool.empty:
         if 'q_word' not in st.session_state:
-            st.session_state.q_word = today_targets.sample(1).iloc[0]
-            st.session_state.q_answered = False
-            
+            # 기습 질문: 오답이나 시험단어에 50% 가중치
+            special = quiz_pool[(quiz_pool['학교오답']=="O") | (quiz_pool['시험용']=="O")]
+            if not special.empty and datetime.now().second % 2 == 0: # 50% 확률로 기습 질문
+                st.session_state.q_word = special.sample(1).iloc[0]
+                st.session_state.is_surprise = True
+            else:
+                st.session_state.q_word = quiz_pool.sample(1).iloc[0]
+                st.session_state.is_surprise = False
+            st.session_state.q_done = False
+
         q = st.session_state.q_word
-        badge_q = "🚨 학교 오답!" if str(q['학교오답']) == "O" else "✨"
+        header = "🔥 [기습 질문] 반드시 맞춰야 해!" if st.session_state.is_surprise else "이 단어의 뜻은?"
+        st.markdown(f"<div class='flashcard'><h3>{header}</h3><h1 style='font-size:60px;'>{q['영어']}</h1></div>", unsafe_allow_html=True)
         
-        st.markdown(f"<div class='flashcard'><p style='color:#FF4500; font-size:20px; margin:0;'>{badge_q}</p><h3>이 단어의 뜻은?</h3><h1 style='font-size:70px;'>{q['영어']}</h1></div>", unsafe_allow_html=True)
-        
-        # 문제 푸는 중
-        if not st.session_state.q_answered:
-            ans = st.text_input("정답 입력", key=f"quiz_in_{q['영어']}").strip()
-            
-            if st.button("정답 확인! 🚀"):
-                st.session_state.q_answered = True
+        if not st.session_state.q_done:
+            ans = st.text_input("정답 입력", key=f"q_{q['영어']}").strip()
+            if st.button("정답 확인 🚀"):
+                st.session_state.q_done = True
                 if ans == str(q['한글']).strip():
-                    st.session_state.q_correct = True
-                    # 정답 시 구글 시트 업데이트
+                    st.session_state.q_res = True
                     df_idx = df[df['영어'] == q['영어']].index[0]
                     df.at[df_idx, '상태'] += 1
                     conn.update(data=df)
                 else:
-                    st.session_state.q_correct = False
+                    st.session_state.q_res = False
                 st.rerun()
-                
-        # 결과 확인 후 수동으로 넘어가기
         else:
-            if st.session_state.q_correct:
-                st.balloons()
-                st.success(f"🎉 천재! 정답이야! ('{q['한글']}')")
+            if st.session_state.q_res:
+                st.balloons(); st.success(f"천재! 정답: {q['한글']}")
             else:
-                st.error(f"앗! 틀렸어. 정답은 '{q['한글']}'(이)야. 다음에 꼭 맞추자! 💪")
-                
-            if st.button("➡️ 다음 문제로 넘어가기"):
+                st.error(f"앗! 정답은 '{q['한글']}'(이)야.")
+            if st.button("➡️ 다음 문제"):
                 del st.session_state.q_word
-                st.session_state.q_answered = False
                 st.rerun()
     else:
-        st.success("오늘 시험 볼 단어가 없습니다!")
+        st.write("문제가 없습니다.")
 
-# --- 탭 3: 단어 추가 ---
+# --- 탭 3: 단어 추가 (유형 선택) ---
 with tab3:
-    st.header("📝 새로운 단어 넣기")
-    with st.form("add_form", clear_on_submit=True):
-        new_eng = st.text_input("영어 단어 (예: apple)")
-        new_kor = st.text_input("한글 뜻 (예: 사과)")
-        is_school_wrong = st.checkbox("🏫 학교/문제집에서 틀렸던 단어예요! (체크 시 🚨 뱃지 추가)")
+    st.header("📝 단어 추가")
+    with st.form("add_v8", clear_on_submit=True):
+        eng = st.text_input("영어 단어")
+        kor = st.text_input("한글 뜻")
+        col_a, col_b = st.columns(2)
+        with col_a: is_wrong = st.checkbox("🏫 학교에서 틀린 단어")
+        with col_b: is_test = st.checkbox("📝 이번 시험 범위 단어")
         
-        if st.form_submit_button("단어장에 저장하기 💾"):
-            if new_eng and new_kor:
-                school_mark = "O" if is_school_wrong else "X"
-                new_row = pd.DataFrame([{"영어": new_eng, "한글": new_kor, "상태": 0, "학교오답": school_mark, "등록일": today_str}])
-                updated_df = pd.concat([df, new_row], ignore_index=True)
-                conn.update(data=updated_df)
-                st.success(f"'{new_eng}' 단어 추가 완료! 시트에 저장되었습니다.")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.warning("단어와 뜻을 모두 적어주세요.")
+        if st.form_submit_button("마법의 시트에 저장 💾"):
+            if eng and kor:
+                new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교오답": "O" if is_wrong else "X", "시험용": "O" if is_test else "X", "등록일": today_str}])
+                conn.update(data=pd.concat([df, new_row], ignore_index=True))
+                st.success("성공적으로 저장되었습니다!")
+                time.sleep(1); st.rerun()
 
-# --- 탭 4: 비밀의 방 (안전한 관리 모드 복구) ---
+# --- 탭 4: 비밀의 방 (특수 관리 모드) ---
 with tab4:
-    if st.text_input("아빠 전용 비밀번호", type="password") == "love317619":
-        st.write("### 🛠️ 데이터 관리 (주의해서 사용하세요)")
+    if st.text_input("아빠 비밀번호", type="password") == "love317619":
+        st.subheader("🔒 시크릿 관리소")
+        m_tab1, m_tab2, m_tab3 = st.tabs(["🚨 학교 오답 관리", "📝 시험 단어 관리", "💣 전체 초기화"])
         
-        if not df.empty:
-            with st.expander("🗑️ 개별 단어 삭제"):
-                del_word = st.selectbox("삭제할 단어 선택", df['영어'].tolist())
-                if st.button("선택한 단어 삭제"):
-                    df = df[df['영어'] != del_word]
-                    conn.update(data=df)
-                    st.success(f"'{del_word}' 삭제 완료!")
-                    time.sleep(1)
-                    st.rerun()
-                    
-            with st.expander("📅 일별 단어 삭제"):
-                # 안전한 날짜 추출
-                dates = df['등록일'].dropna().unique().tolist()
-                if dates:
-                    del_date = st.selectbox("삭제할 날짜 선택", dates)
-                    if st.button("해당 날짜 단어 모두 삭제"):
-                        df = df[df['등록일'] != del_date]
-                        conn.update(data=df)
-                        st.success(f"{del_date}에 등록된 단어가 모두 삭제되었습니다.")
-                        time.sleep(1)
-                        st.rerun()
-                else:
-                    st.write("등록일 정보가 있는 단어가 없습니다.")
-                    
-            with st.expander("💣 전체 단어 삭제 (초기화)"):
-                st.warning("정말로 모든 단어를 지우시겠습니까? 복구할 수 없습니다.")
-                if st.checkbox("네, 모두 지우는 것에 동의합니다."):
-                    if st.button("전체 삭제 실행", type="primary"):
-                        empty_df = pd.DataFrame(columns=required_cols)
-                        conn.update(data=empty_df)
-                        st.success("모든 단어가 삭제되었습니다.")
-                        time.sleep(1)
-                        st.rerun()
-                        
-            st.write("---")
-            st.write("📊 현재 시트 데이터 미리보기")
-            st.dataframe(df)
-        else:
-            st.info("현재 단어장에 저장된 단어가 없습니다.")
+        with m_tab1:
+            wrong_list = df[df['학교오답'] == "O"]
+            st.write(f"현재 학교에서 틀린 단어: {len(wrong_list)}개")
+            st.dataframe(wrong_list[['영어', '한글', '상태']])
+            if st.button("🚨 학교 오답만 전부 다시 공부하기(상태 0)"):
+                df.loc[df['학교오답'] == "O", '상태'] = 0
+                conn.update(data=df); st.success("초기화 완료!"); st.rerun()
+        
+        with m_tab2:
+            test_list = df[df['시험용'] == "O"]
+            st.write(f"현재 시험용 단어: {len(test_list)}개")
+            st.dataframe(test_list[['영어', '한글', '등록일']])
+            if st.button("🗑️ 시험 끝! 시험 단어만 삭제하기"):
+                df = df[df['시험용'] != "O"]
+                conn.update(data=df); st.success("삭제 완료!"); st.rerun()
+
+        with m_tab3:
+            if st.checkbox("위험: 모든 데이터를 삭제하시겠습니까?"):
+                if st.button("전체 삭제 실행", type="primary"):
+                    conn.update(data=pd.DataFrame(columns=required_cols))
+                    st.success("초기화되었습니다."); st.rerun()
