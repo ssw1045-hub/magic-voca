@@ -79,7 +79,6 @@ if 'main_df' not in st.session_state:
             
         loaded_df['상태'] = pd.to_numeric(loaded_df['상태'], errors='coerce').fillna(0).astype(int)
         
-        # 한국 시간 기준 등록일 설정
         kst_now = datetime.utcnow() + timedelta(hours=9)
         today_str = kst_now.strftime('%Y-%m-%d')
         
@@ -97,9 +96,8 @@ if 'main_df' not in st.session_state:
 df = st.session_state.main_df
 
 # ==========================================
-# 3. 달력 기반 스케줄링 (한국 시간 강제 적용!)
+# 3. 달력 기반 스케줄링 (한국 시간 강제 적용)
 # ==========================================
-# UTC 시간에 9시간을 더해 항상 정확한 한국 시간(KST)을 구합니다.
 today_date = datetime.utcnow() + timedelta(hours=9)
 today_str = today_date.strftime('%Y-%m-%d')
 
@@ -172,14 +170,19 @@ def run_flashcard(target_list, mode_name, limit):
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
     # ==============================================
-    # 🤖 AI 예문 자동 생성
+    # 🤖 [V32] AI 예문 자동 생성 (자가 진단 기능 탑재)
     # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "" or str(row['예문']).strip() == "nan":
-                if HAS_GENAI and MY_GEMINI_API_KEY:
+                # 💡 앱이 스스로 원인을 진단합니다!
+                if not HAS_GENAI:
+                    st.error("🚨 AI 라이브러리가 설치되지 않았습니다! (requirements.txt 확인 필요)")
+                elif not MY_GEMINI_API_KEY:
+                    st.error("🚨 스팀릿 비밀 금고(Secrets)에서 API 키를 찾을 수 없습니다! 설정 창을 다시 확인해주세요.")
+                else:
                     with st.spinner("🤖 AI 비서가 오직 영어로만 예문을 영작 중입니다..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
