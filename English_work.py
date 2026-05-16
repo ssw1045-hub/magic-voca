@@ -18,7 +18,7 @@ except ImportError:
 # 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
 # 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
 # ==========================================
-MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
+MY_GEMINI_API_KEY = "AIzaSyCxTCokinz9BfuJ-rOn1C5GOR42kcwxdSU"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
