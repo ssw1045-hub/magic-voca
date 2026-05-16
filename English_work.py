@@ -5,7 +5,7 @@ import time
 import random
 from gtts import gTTS
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 import calendar
 
 try:
@@ -15,10 +15,12 @@ except ImportError:
     HAS_GENAI = False
 
 # ==========================================
-# 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
-# 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
+# 🤖 비밀 금고에서 API 키 몰래 가져오기
 # ==========================================
-MY_GEMINI_API_KEY = "AIzaSyCxTCokinz9BfuJ-rOn1C5GOR42kcwxdSU"
+try:
+    MY_GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    MY_GEMINI_API_KEY = ""
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -76,7 +78,11 @@ if 'main_df' not in st.session_state:
             if col not in loaded_df.columns: loaded_df[col] = ""
             
         loaded_df['상태'] = pd.to_numeric(loaded_df['상태'], errors='coerce').fillna(0).astype(int)
-        today_str = datetime.today().strftime('%Y-%m-%d')
+        
+        # 한국 시간 기준 등록일 설정
+        kst_now = datetime.utcnow() + timedelta(hours=9)
+        today_str = kst_now.strftime('%Y-%m-%d')
+        
         loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str).astype(str)
         loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등').astype(str)
         loaded_df['예문'] = loaded_df['예문'].fillna("").astype(str) 
@@ -91,13 +97,16 @@ if 'main_df' not in st.session_state:
 df = st.session_state.main_df
 
 # ==========================================
-# 3. 달력 기반 스케줄링 (일요일 시작)
+# 3. 달력 기반 스케줄링 (한국 시간 강제 적용!)
 # ==========================================
-today_date = datetime.today()
+# UTC 시간에 9시간을 더해 항상 정확한 한국 시간(KST)을 구합니다.
+today_date = datetime.utcnow() + timedelta(hours=9)
 today_str = today_date.strftime('%Y-%m-%d')
+
 custom_weekday = (today_date.weekday() + 1) % 7 
 week_days_custom = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"]
 today_name = week_days_custom[custom_weekday]
+
 last_day_of_month = calendar.monthrange(today_date.year, today_date.month)[1]
 is_last_day = (today_date.day == last_day_of_month)
 
@@ -110,7 +119,7 @@ progress = (master_cnt / total_cnt) if total_cnt > 0 else 0
 
 if is_last_day:
     study_limit = 9999 
-    st.sidebar.error(f"🔥 오늘은 월말 총평가! 90점 이상 받고 룰렛 티켓을 노리세요!")
+    st.sidebar.error(f"🔥 오늘은 {today_date.month}월의 마지막 날!\n월말 총평가! 90점 이상 받고 룰렛 티켓을 노리세요!")
 elif custom_weekday == 6: 
     study_limit = 180
     st.sidebar.success(f"👑 오늘은 {today_name}! 이번 주 총복습 및 시험일입니다.")
@@ -163,14 +172,14 @@ def run_flashcard(target_list, mode_name, limit):
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
     # ==============================================
-    # 🤖 [V30] AI 예문 자동 생성 (강력한 영어 전용 명령!)
+    # 🤖 AI 예문 자동 생성
     # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "" or str(row['예문']).strip() == "nan":
-                if HAS_GENAI and MY_GEMINI_API_KEY and MY_GEMINI_API_KEY != "여기에_아버님의_API키를_붙여넣으세요":
+                if HAS_GENAI and MY_GEMINI_API_KEY:
                     with st.spinner("🤖 AI 비서가 오직 영어로만 예문을 영작 중입니다..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
@@ -183,8 +192,6 @@ def run_flashcard(target_list, mode_name, limit):
                                     elif 'pro' in v: target_model = v
 
                                 model = genai.GenerativeModel(target_model)
-                                
-                                # 💡 프롬프트를 영어로 아주 엄격하게 작성!
                                 prompt = f"""
                                 Create exactly ONE very simple, short English sentence for a middle school student using the word '{row['영어']}'.
                                 RULES:
@@ -195,7 +202,6 @@ def run_flashcard(target_list, mode_name, limit):
                                 res = model.generate_content(prompt)
                                 
                                 df_idx = df[df['영어'] == row['영어']].index[0]
-                                # 혹시 모를 한글 찌꺼기나 따옴표 등을 파이썬에서 한 번 더 정리
                                 clean_text = res.text.strip().replace('"', '').replace("'", "")
                                 df.at[df_idx, '예문'] = clean_text
                                 
