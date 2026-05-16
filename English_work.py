@@ -34,15 +34,14 @@ if 'quiz_pool' not in st.session_state: st.session_state.quiz_pool = []
 if 'quiz_stats' not in st.session_state: st.session_state.quiz_stats = {'total': 0, 'correct': 0, 'is_school_quiz': False}
 
 # ==========================================
-# 2. 구글 시트 고속 메모리 연동 (오류 완벽 차단 기법)
+# 2. 구글 시트 고속 메모리 연동 (오류 완벽 차단)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
+required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
 
-# 앱의 메모리(session_state)에 단어 데이터가 없을 때만 딱 한 번 구글에서 읽어옵니다.
 if 'main_df' not in st.session_state:
     try:
         loaded_df = conn.read(ttl=0)
-        required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
         for col in required_cols:
             if col not in loaded_df.columns: loaded_df[col] = ""
             
@@ -50,19 +49,16 @@ if 'main_df' not in st.session_state:
         today_str = datetime.today().strftime('%Y-%m-%d')
         loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str)
         loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등')
-        
-        # 메모리에 안전하게 저장
         st.session_state.main_df = loaded_df
     except Exception as e:
-        st.error(f"🚨 구글 시트 연결에 실패했습니다. 인터넷 연결이나 시트 설정을 확인해주세요. (원인: {e})")
+        st.error(f"🚨 구글 시트 연결 실패! (원인: {e})")
         st.stop()
 
-# 이제 앱은 구글 서버를 매번 찌르지 않고 메모리에 저장된 데이터를 초고속으로 읽습니다.
 df = st.session_state.main_df
 today_str = datetime.today().strftime('%Y-%m-%d')
 
 # ==========================================
-# 3. 사이드바 (레벨, 진도 및 수동 동기화 버튼)
+# 3. 사이드바 (레벨, 진도 및 수동 동기화)
 # ==========================================
 selected_level = st.sidebar.selectbox("🎯 학습 레벨 선택", ["중등", "고등"])
 level_df = df[df['레벨'] == selected_level]
@@ -76,9 +72,8 @@ st.sidebar.progress(progress)
 st.sidebar.write(f"{master_cnt} / {total_cnt} 완료")
 
 st.sidebar.write("---")
-if st.sidebar.button("🔄 구글시트 강제 동기화", help="구글 시트에서 직접 단어를 수정했을 때 눌러주세요."):
-    if 'main_df' in st.session_state:
-        del st.session_state.main_df
+if st.sidebar.button("🔄 구글시트 강제 동기화"):
+    if 'main_df' in st.session_state: del st.session_state.main_df
     st.rerun()
 
 # ==========================================
@@ -95,14 +90,12 @@ def run_flashcard(target_list, mode_name):
     if st.session_state.force_review and mode_name == "일반 단어":
         st.error("🚨 이전 시험에서 80점 미만을 받았어요! 다시 철저하게 복습하세요! 🚨")
 
-    # 아빠의 기획: 딱 30개 단위로 끊어서 학습
     target_list = target_list.head(30)
 
     if target_list.empty:
         st.success(f"🎊 {mode_name}에 공부할 단어가 없어요!")
         return
 
-    # 학습 완료 안내 창
     if st.session_state.f_idx >= len(target_list):
         st.session_state.force_review = False
         st.markdown(f"<div class='flashcard'><h2>🎉 {mode_name} {len(target_list)}개 학습 완료!</h2><p>목표량을 다 채웠어요! 이제 무엇을 할까요?</p></div>", unsafe_allow_html=True)
@@ -210,15 +203,12 @@ with tab3:
                         df.at[df_idx, '상태'] = 0
                         df.at[df_idx, '등록일'] = today_str
                         
-                    # 메모리와 구글시트를 동시에 업데이트
                     st.session_state.main_df = df
                     conn.update(data=df)
                     st.rerun()
             else:
-                if st.session_state.q_res: 
-                    st.balloons(); st.success(f"🎉 정답이야! (등록된 뜻: {q['한글']})")
-                else: 
-                    st.error(f"오답! 정답은 '{q['한글']}' (이)야. (내일 복습에 자동 추가됨!)")
+                if st.session_state.q_res: st.balloons(); st.success(f"🎉 정답이야! (등록된 뜻: {q['한글']})")
+                else: st.error(f"오답! 정답은 '{q['한글']}' (이)야. (내일 복습에 자동 추가됨!)")
                 
                 if st.button("➡️ 다음 문제"):
                     st.session_state.quiz_pool.pop(0)
@@ -248,7 +238,6 @@ with tab3:
             else:
                 if score >= 80: st.success("🎉 80점 이상 통과! 참 잘했어요!")
                 else: st.info("학교/학원 단어 시험 수고했어요!")
-                
                 if st.button("🏠 메인으로 가기"):
                     st.session_state.test_active = False
                     st.rerun()
@@ -267,20 +256,17 @@ with tab4:
             if eng and kor:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
                 updated_df = pd.concat([df, new_row], ignore_index=True)
-                
-                # 메모리와 구글시트 동시 업데이트
                 st.session_state.main_df = updated_df
                 conn.update(data=updated_df)
-                
                 st.success("저장 완료!")
                 time.sleep(1); st.rerun()
             else: st.warning("영어 단어와 한글 뜻은 꼭 적어주세요!")
 
-# --- 탭 5: 비밀의 방 ---
+# --- 탭 5: 비밀의 방 (최고급 스마트 삭제 기능 추가!) ---
 with tab5:
     if st.text_input("아빠 비밀번호", type="password") == "love317619":
         st.subheader("🔒 아빠의 관리소")
-        m_tab1, m_tab2 = st.tabs(["📅 학습 캘린더", "💣 데이터 정리"])
+        m_tab1, m_tab2 = st.tabs(["📅 학습 캘린더", "🧹 스마트 관리 및 삭제"])
         
         with m_tab1:
             studied_dates = set(df['최근학습일'].dropna().replace("", pd.NA).dropna().tolist())
@@ -301,9 +287,67 @@ with tab5:
             st.markdown(cal_html, unsafe_allow_html=True)
             
         with m_tab2:
-            st.dataframe(df)
-            if st.button("💣 전체 데이터 초기화"):
-                empty_df = pd.DataFrame(columns=required_cols)
-                st.session_state.main_df = empty_df
-                conn.update(data=empty_df)
-                st.success("초기화 완료!"); st.rerun()
+            st.write("### 🧹 데이터 스마트 삭제 도구")
+            
+            if not df.empty:
+                # 1. 카테고리별 스마트 일괄 삭제 기능
+                st.write("#### ⚡ 카테고리별 일괄 삭제")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("🏫 학교/학원 단어만 모두 삭제"):
+                        updated_df = df[df['학교학원'] != "O"]
+                        st.session_state.main_df = updated_df
+                        conn.update(data=updated_df)
+                        st.success("학교/학원 단어가 모두 삭제되었습니다.")
+                        time.sleep(1); st.rerun()
+                with col_b:
+                    if st.button("👑 마스터(상태 4 이상) 단어 삭제"):
+                        updated_df = df[df['상태'] < 4]
+                        st.session_state.main_df = updated_df
+                        conn.update(data=updated_df)
+                        st.success("마스터한 단어가 모두 삭제되었습니다.")
+                        time.sleep(1); st.rerun()
+
+                st.write("---")
+
+                # 2. 이메일 스타일: 체크박스 대량 삭제 기능 (최고급)
+                st.write("#### ✅ 체크박스 선택 삭제 (표에서 직접 선택)")
+                st.info("지우고 싶은 단어 맨 앞의 체크박스(✅)를 누르고 아래 삭제 버튼을 누르세요.")
+                
+                # 삭제용 임시 체크박스 컬럼 추가
+                df_for_edit = df.copy()
+                df_for_edit.insert(0, "삭제선택", False)
+                
+                # data_editor로 표 띄우기
+                edited_df = st.data_editor(
+                    df_for_edit,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={"삭제선택": st.column_config.CheckboxColumn("삭제✅", default=False)}
+                )
+                
+                if st.button("🗑️ 체크한 단어들 한꺼번에 삭제하기"):
+                    # 체크된 단어들의 영어 이름 추출
+                    words_to_delete = edited_df[edited_df["삭제선택"] == True]["영어"].tolist()
+                    if words_to_delete:
+                        updated_df = df[~df["영어"].isin(words_to_delete)]
+                        st.session_state.main_df = updated_df
+                        conn.update(data=updated_df)
+                        st.success(f"선택하신 {len(words_to_delete)}개의 단어가 깔끔하게 삭제되었습니다!")
+                        time.sleep(1.5); st.rerun()
+                    else:
+                        st.warning("삭제할 단어를 먼저 표에서 체크해주세요.")
+                
+                st.write("---")
+                
+                # 3. 전체 데이터 초기화 (폭탄)
+                with st.expander("💣 전체 데이터 초기화 (복구 불가)"):
+                    st.warning("⚠️ 모든 데이터가 싹 삭제되며 복구할 수 없습니다.")
+                    if st.checkbox("네, 전체 삭제에 동의합니다.", key="del_all_check"):
+                        if st.button("전체 초기화 실행", type="primary"):
+                            empty_df = pd.DataFrame(columns=required_cols)
+                            st.session_state.main_df = empty_df
+                            conn.update(data=empty_df)
+                            st.success("초기화 완료!"); time.sleep(1); st.rerun()
+            else:
+                st.info("단어장에 저장된 단어가 없습니다.")
