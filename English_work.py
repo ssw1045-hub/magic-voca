@@ -161,7 +161,7 @@ def run_flashcard(target_list, mode_name, limit):
                     with st.spinner("🤖 AI 비서가 고은이를 위해 예문을 만들고 있어요..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
-                            model = genai.GenerativeModel('gemini-pro')
+                            model = genai.GenerativeModel('gemini-1.5-flash')
                             prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
                             res = model.generate_content(prompt)
                             
