@@ -18,7 +18,7 @@ except ImportError:
 # 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
 # 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
 # ==========================================
-MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
+MY_GEMINI_API_KEY = "AIzaSyCxTCokinz9BfuJ-rOn1C5GOR42kcwxdSU"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -57,18 +57,17 @@ if 'spin_tickets' not in st.session_state: st.session_state.spin_tickets = 0
 if 'prizes' not in st.session_state: st.session_state.prizes = default_prizes
 
 # ==========================================
-# 2. 구글 시트 연결 및 안전 저장 기능 (에러 우회!)
+# 2. 구글 시트 연결 및 안전 저장 기능
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
 
-# 💡 안전 저장 함수: 구글 시트 저장이 막혀도 앱 메모리에는 살려둠! (에러 방지용)
 def save_data(updated_df):
     st.session_state.main_df = updated_df
     try:
         conn.update(data=updated_df)
     except Exception:
-        pass # 구글 보안 에러가 나도 앱이 멈추지 않고 조용히 넘어감
+        pass 
 
 if 'main_df' not in st.session_state:
     try:
@@ -164,7 +163,7 @@ def run_flashcard(target_list, mode_name, limit):
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
     # ==============================================
-    # 🤖 AI 예문 자동 생성 (영어만 출력하도록 강력 지시!)
+    # 🤖 [V30] AI 예문 자동 생성 (강력한 영어 전용 명령!)
     # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
@@ -175,7 +174,6 @@ def run_flashcard(target_list, mode_name, limit):
                     with st.spinner("🤖 AI 비서가 오직 영어로만 예문을 영작 중입니다..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
-                            
                             valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                             
                             if valid_models:
@@ -186,14 +184,21 @@ def run_flashcard(target_list, mode_name, limit):
 
                                 model = genai.GenerativeModel(target_model)
                                 
-                                # 💡 프롬프트 수정: 한글 절대 금지, 오직 영어만!
-                                prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개를 만들어줘. **절대로 한글 해석이나 설명은 적지 말고, 오직 영어 문장만 딱 1줄**로 출력해."
+                                # 💡 프롬프트를 영어로 아주 엄격하게 작성!
+                                prompt = f"""
+                                Create exactly ONE very simple, short English sentence for a middle school student using the word '{row['영어']}'.
+                                RULES:
+                                1. Output ONLY the English sentence.
+                                2. DO NOT include any Korean translation.
+                                3. DO NOT include explanations, bullet points, or quotes.
+                                """
                                 res = model.generate_content(prompt)
                                 
                                 df_idx = df[df['영어'] == row['영어']].index[0]
-                                df.at[df_idx, '예문'] = res.text.strip()
+                                # 혹시 모를 한글 찌꺼기나 따옴표 등을 파이썬에서 한 번 더 정리
+                                clean_text = res.text.strip().replace('"', '').replace("'", "")
+                                df.at[df_idx, '예문'] = clean_text
                                 
-                                # 🛡️ 안전하게 저장 (에러나도 메모리에는 남김)
                                 save_data(df)
                                 st.rerun() 
                         except Exception as e:
@@ -243,7 +248,6 @@ with tab3:
                     else: 
                         st.session_state.q_res = False; df.at[df_idx, '상태'] = 0; df.at[df_idx, '등록일'] = today_str
                     
-                    # 🛡️ 퀴즈 점수도 안전하게 저장
                     save_data(df)
                     st.rerun()
             else:
@@ -293,10 +297,8 @@ with tab5:
             if eng and kor:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
                 df = pd.concat([df, new_row], ignore_index=True)
-                
-                # 🛡️ 단어 추가도 안전하게 저장
                 save_data(df)
-                st.success("단어가 임시 메모리에 저장되었습니다!"); time.sleep(1); st.rerun()
+                st.success("단어가 저장되었습니다!"); time.sleep(1); st.rerun()
 
 # --- 탭 6: 비밀의 방 ---
 with tab6:
