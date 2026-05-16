@@ -18,7 +18,7 @@ except ImportError:
 # 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
 # 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
 # ==========================================
-MY_GEMINI_API_KEY = "AIzaSyCxTCokinz9BfuJ-rOn1C5GOR42kcwxdSU"
+MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -57,10 +57,18 @@ if 'spin_tickets' not in st.session_state: st.session_state.spin_tickets = 0
 if 'prizes' not in st.session_state: st.session_state.prizes = default_prizes
 
 # ==========================================
-# 2. 구글 시트 데이터 로드
+# 2. 구글 시트 연결 및 안전 저장 기능 (에러 우회!)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
+
+# 💡 안전 저장 함수: 구글 시트 저장이 막혀도 앱 메모리에는 살려둠! (에러 방지용)
+def save_data(updated_df):
+    st.session_state.main_df = updated_df
+    try:
+        conn.update(data=updated_df)
+    except Exception:
+        pass # 구글 보안 에러가 나도 앱이 멈추지 않고 조용히 넘어감
 
 if 'main_df' not in st.session_state:
     try:
@@ -68,12 +76,11 @@ if 'main_df' not in st.session_state:
         for col in required_cols:
             if col not in loaded_df.columns: loaded_df[col] = ""
             
-        # 💡 [V28 업데이트] 빈칸이라도 무조건 텍스트(문자열)로 강제 인식시킴
         loaded_df['상태'] = pd.to_numeric(loaded_df['상태'], errors='coerce').fillna(0).astype(int)
         today_str = datetime.today().strftime('%Y-%m-%d')
         loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str).astype(str)
         loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등').astype(str)
-        loaded_df['예문'] = loaded_df['예문'].fillna("").astype(str)  # 강제 텍스트화 (에러 해결!)
+        loaded_df['예문'] = loaded_df['예문'].fillna("").astype(str) 
         loaded_df['한글'] = loaded_df['한글'].fillna("").astype(str)
         loaded_df['최근학습일'] = loaded_df['최근학습일'].fillna("").astype(str)
         
@@ -105,7 +112,7 @@ progress = (master_cnt / total_cnt) if total_cnt > 0 else 0
 if is_last_day:
     study_limit = 9999 
     st.sidebar.error(f"🔥 오늘은 월말 총평가! 90점 이상 받고 룰렛 티켓을 노리세요!")
-elif custom_weekday == 6: # 토요일
+elif custom_weekday == 6: 
     study_limit = 180
     st.sidebar.success(f"👑 오늘은 {today_name}! 이번 주 총복습 및 시험일입니다.")
 else:
@@ -157,7 +164,7 @@ def run_flashcard(target_list, mode_name, limit):
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
     # ==============================================
-    # 🤖 AI 예문 자동 생성 
+    # 🤖 AI 예문 자동 생성 (영어만 출력하도록 강력 지시!)
     # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
@@ -165,40 +172,36 @@ def run_flashcard(target_list, mode_name, limit):
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "" or str(row['예문']).strip() == "nan":
                 if HAS_GENAI and MY_GEMINI_API_KEY and MY_GEMINI_API_KEY != "여기에_아버님의_API키를_붙여넣으세요":
-                    with st.spinner("🤖 AI 비서가 예문을 영작 중입니다..."):
+                    with st.spinner("🤖 AI 비서가 오직 영어로만 예문을 영작 중입니다..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
                             
-                            valid_models = []
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    valid_models.append(m.name)
+                            valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                             
-                            if not valid_models:
-                                st.error("이 API 키로 사용할 수 있는 텍스트 생성 모델이 없습니다.")
-                            else:
+                            if valid_models:
                                 target_model = valid_models[0]
                                 for v in valid_models:
                                     if 'flash' in v: target_model = v; break
                                     elif 'pro' in v: target_model = v
 
                                 model = genai.GenerativeModel(target_model)
-                                prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
+                                
+                                # 💡 프롬프트 수정: 한글 절대 금지, 오직 영어만!
+                                prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개를 만들어줘. **절대로 한글 해석이나 설명은 적지 말고, 오직 영어 문장만 딱 1줄**로 출력해."
                                 res = model.generate_content(prompt)
                                 
                                 df_idx = df[df['영어'] == row['영어']].index[0]
                                 df.at[df_idx, '예문'] = res.text.strip()
-                                st.session_state.main_df = df
-                                conn.update(data=df)
+                                
+                                # 🛡️ 안전하게 저장 (에러나도 메모리에는 남김)
+                                save_data(df)
                                 st.rerun() 
                         except Exception as e:
                             st.error(f"AI 예문 생성 실패! 에러: {e}")
-                else:
-                    pass
 
     if st.session_state.show_meaning: st.success(f"정답: {row['한글']}")
     if st.session_state.show_example:
-        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" and str(row['예문']).strip() != "nan" else "등록된 예문이 없습니다. (코드 상단에 API 키가 잘 입력되었는지 확인해주세요!)"
+        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" and str(row['예문']).strip() != "nan" else "등록된 예문이 없습니다."
         st.info(f"📝 예문: {ex_text}")
         
     if not st.session_state.show_meaning and not st.session_state.show_example: st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
@@ -239,7 +242,10 @@ with tab3:
                         df.at[df_idx, '상태'] = int(df.at[df_idx, '상태']) + 1; df.at[df_idx, '최근학습일'] = today_str
                     else: 
                         st.session_state.q_res = False; df.at[df_idx, '상태'] = 0; df.at[df_idx, '등록일'] = today_str
-                    st.session_state.main_df = df; conn.update(data=df); st.rerun()
+                    
+                    # 🛡️ 퀴즈 점수도 안전하게 저장
+                    save_data(df)
+                    st.rerun()
             else:
                 if st.session_state.q_res: st.balloons(); st.success(f"🎉 정답이야! ({q['한글']})")
                 else: st.error(f"오답! 정답은 '{q['한글']}' (이)야.")
@@ -286,7 +292,11 @@ with tab5:
         if st.form_submit_button("저장하기 💾"):
             if eng and kor:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
-                st.session_state.main_df = pd.concat([df, new_row], ignore_index=True); conn.update(data=st.session_state.main_df); st.success("저장 완료!"); time.sleep(1); st.rerun()
+                df = pd.concat([df, new_row], ignore_index=True)
+                
+                # 🛡️ 단어 추가도 안전하게 저장
+                save_data(df)
+                st.success("단어가 임시 메모리에 저장되었습니다!"); time.sleep(1); st.rerun()
 
 # --- 탭 6: 비밀의 방 ---
 with tab6:
@@ -312,13 +322,13 @@ with tab6:
         with m_tab2:
             st.write("#### ⚡ 카테고리별 삭제")
             c_a, c_b = st.columns(2)
-            if c_a.button("🏫 학교단어 전체 삭제"): st.session_state.main_df = df[df['학교학원'] != "O"]; conn.update(data=st.session_state.main_df); st.rerun()
-            if c_b.button("👑 마스터 단어 삭제"): st.session_state.main_df = df[df['상태'] < 4]; conn.update(data=st.session_state.main_df); st.rerun()
+            if c_a.button("🏫 학교단어 전체 삭제"): df = df[df['학교학원'] != "O"]; save_data(df); st.rerun()
+            if c_b.button("👑 마스터 단어 삭제"): df = df[df['상태'] < 4]; save_data(df); st.rerun()
             df_for_edit = df.copy(); df_for_edit.insert(0, "삭제선택", False)
             edited_df = st.data_editor(df_for_edit, hide_index=True, use_container_width=True, column_config={"삭제선택": st.column_config.CheckboxColumn("삭제✅", default=False)})
             if st.button("🗑️ 체크 단어 일괄 삭제"):
                 words_to_del = edited_df[edited_df["삭제선택"] == True]["영어"].tolist()
-                if words_to_del: st.session_state.main_df = df[~df["영어"].isin(words_to_del)]; conn.update(data=st.session_state.main_df); st.rerun()
+                if words_to_del: df = df[~df["영어"].isin(words_to_del)]; save_data(df); st.rerun()
         
         with m_tab3:
             if st.button("🎟️ 고은이에게 티켓 1장 몰래 주기"): st.session_state.spin_tickets += 1; st.success("지급 완료!"); time.sleep(1); st.rerun()
