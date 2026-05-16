@@ -8,12 +8,17 @@ import io
 from datetime import datetime
 import calendar
 
-# 🤖 AI 예문 생성기 라이브러리 로드
 try:
     import google.generativeai as genai
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
+
+# ==========================================
+# 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
+# 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
+# ==========================================
+MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -50,7 +55,6 @@ if 'quiz_pool' not in st.session_state: st.session_state.quiz_pool = []
 if 'quiz_stats' not in st.session_state: st.session_state.quiz_stats = {'total': 0, 'correct': 0, 'is_school_quiz': False}
 if 'spin_tickets' not in st.session_state: st.session_state.spin_tickets = 0
 if 'prizes' not in st.session_state: st.session_state.prizes = default_prizes
-if 'gemini_key' not in st.session_state: st.session_state.gemini_key = "" # 🤖 AI 키 저장용
 
 # ==========================================
 # 2. 구글 시트 데이터 로드
@@ -146,16 +150,17 @@ def run_flashcard(target_list, mode_name, limit):
     with c2:
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
-    # 🤖 AI 예문 자동 생성 핵심 로직
+    # 🤖 AI 예문 자동 생성 로직
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "":
-                if HAS_GENAI and st.session_state.gemini_key:
+                # 코드가 가지고 있는 영구 API 키 사용
+                if HAS_GENAI and MY_GEMINI_API_KEY and MY_GEMINI_API_KEY != "여기에_아버님의_API키를_붙여넣으세요":
                     with st.spinner("🤖 AI 비서가 고은이를 위해 예문을 만들고 있어요..."):
                         try:
-                            genai.configure(api_key=st.session_state.gemini_key)
+                            genai.configure(api_key=MY_GEMINI_API_KEY)
                             model = genai.GenerativeModel('gemini-1.5-flash')
                             prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
                             res = model.generate_content(prompt)
@@ -164,15 +169,15 @@ def run_flashcard(target_list, mode_name, limit):
                             df.at[df_idx, '예문'] = res.text.strip()
                             st.session_state.main_df = df
                             conn.update(data=df)
-                            st.rerun() # 만든 즉시 새로고침해서 보여줌
+                            st.rerun() 
                         except Exception as e:
-                            st.error("AI 예문 생성 실패! API 키를 확인해주세요.")
+                            st.error(f"AI 예문 생성 실패! API 키를 확인해주세요. 에러: {e}")
                 else:
-                    pass # AI 키가 없으면 아래 안내문 출력
+                    pass
 
     if st.session_state.show_meaning: st.success(f"정답: {row['한글']}")
     if st.session_state.show_example:
-        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다. (비밀의 방에서 AI 비서를 연결해주세요!)"
+        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다. (코드 맨 위에 API 키가 잘 입력되었는지 확인해주세요!)"
         st.info(f"📝 예문: {ex_text}")
         
     if not st.session_state.show_meaning and not st.session_state.show_example: st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
@@ -262,13 +267,27 @@ with tab5:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
                 st.session_state.main_df = pd.concat([df, new_row], ignore_index=True); conn.update(data=st.session_state.main_df); st.success("저장 완료!"); time.sleep(1); st.rerun()
 
-# --- 탭 6: 비밀의 방 (AI 설정 추가!) ---
+# --- 탭 6: 비밀의 방 ---
 with tab6:
     if st.text_input("아빠 비밀번호", type="password") == "love317619":
         st.subheader("🔒 아빠의 관리소")
-        m_tab1, m_tab2, m_tab3, m_tab4, m_tab5 = st.tabs(["📅 캘린더", "🧹 삭제", "🎟️ 치트키", "🎁 선물", "🤖 AI 비서"])
+        m_tab1, m_tab2, m_tab3, m_tab4 = st.tabs(["📅 캘린더", "🧹 삭제", "🎟️ 치트키", "🎁 선물"])
         
-        with m_tab1: st.write("달력 생략 (코드 길이상 기존 유지됨 동일 기능 작동)")
+        with m_tab1:
+            studied_dates = set(df['최근학습일'].dropna().replace("", pd.NA).dropna().tolist())
+            cal = calendar.Calendar(firstweekday=6); month_days = cal.monthdatescalendar(datetime.now().year, datetime.now().month)
+            cal_html = "<table style='width:100%; text-align:center; border-collapse:collapse;'><tr style='background:#9370DB; color:white;'><th>일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th>토</th></tr>"
+            for week in month_days:
+                cal_html += "<tr>"
+                for d in week:
+                    d_str = d.strftime('%Y-%m-%d')
+                    if d.month == datetime.now().month:
+                        if d_str in studied_dates: cal_html += f"<td style='padding:15px; border:1px solid #FFB6C1; background:#FFF0F5;'>🟢<br><b>{d.day}</b></td>"
+                        else: cal_html += f"<td style='padding:15px; border:1px solid #ddd;'>{d.day}</td>"
+                    else: cal_html += "<td style='padding:15px; border:1px solid #ddd; color:#ccc;'></td>"
+                cal_html += "</tr>"
+            cal_html += "</table>"; st.markdown(cal_html, unsafe_allow_html=True)
+            
         with m_tab2:
             st.write("#### ⚡ 카테고리별 삭제")
             c_a, c_b = st.columns(2)
@@ -287,13 +306,3 @@ with tab6:
             with st.form("prize_form"):
                 new_prizes = [st.text_input(f"선물 {i+1}번", value=st.session_state.prizes[i]) for i in range(10)]
                 if st.form_submit_button("선물 업데이트! 💾"): st.session_state.prizes = new_prizes; st.success("장전 완료!"); time.sleep(1); st.rerun()
-        
-        # 🤖 AI 예문 비서 키 설정
-        with m_tab5:
-            st.write("### 🤖 자동 예문 생성 AI 연결")
-            st.write("구글의 무료 AI(Gemini) 키를 넣으시면 빈칸 예문을 자동으로 영작해 줍니다!")
-            st.info("발급처: https://aistudio.google.com/app/apikey (구글 로그인 후 무료 생성)")
-            ai_key = st.text_input("Gemini API 키 붙여넣기", type="password", value=st.session_state.gemini_key)
-            if st.button("AI 비서 연결하기 🔌"):
-                st.session_state.gemini_key = ai_key
-                st.success("✅ 연결 완료! 이제 예문이 없으면 AI가 1초 만에 만들어줍니다!")
