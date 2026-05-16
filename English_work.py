@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import time
+import random
 from gtts import gTTS
 import io
 from datetime import datetime
@@ -15,20 +16,22 @@ st.markdown("""
 <style>
     .stApp { background-color: #FFF0F5 !important; }
     h1, h2, h3, p, span, div, label, li, td, th { color: #4B0082 !important; font-family: 'Apple SD Gothic Neo', sans-serif !important; font-weight: bold !important; }
-    .stButton>button { width: 100%; border-radius: 15px; background: linear-gradient(135deg, #9370DB, #8A2BE2) !important; color: white !important; font-weight: bold; height: 3.5em; box-shadow: 0px 4px 6px rgba(0,0,0,0.2); }
+    .stButton>button { width: 100%; border-radius: 15px; background: linear-gradient(135deg, #9370DB, #8A2BE2) !important; color: white !important; font-weight: bold; height: 3.5em; box-shadow: 0px 4px 6px rgba(0,0,0,0.2); margin-bottom: 5px; }
     .flashcard { background: white; padding: 50px 20px; border-radius: 30px; border: 4px solid #FFB6C1; text-align: center; margin-bottom: 25px; box-shadow: 0px 10px 20px rgba(255,182,193,0.4); }
     .stProgress > div > div > div > div { background-color: #9370DB !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# 1. 제목 변경 (아빠의 요청사항)
 st.title("💖 영단어 암기 App(SGE)")
 
-# 상태 변수 초기화
+# --- 상태 변수 (앱을 완전히 끄지 않는 한 유지됨) ---
 if 'test_active' not in st.session_state: st.session_state.test_active = False
+if 'force_review' not in st.session_state: st.session_state.force_review = False # 80점 미만 강제 복습
 if 'show_meaning' not in st.session_state: st.session_state.show_meaning = False
-if 'flash_cycle_done' not in st.session_state: st.session_state.flash_cycle_done = False
+if 'show_example' not in st.session_state: st.session_state.show_example = False
 if 'f_idx' not in st.session_state: st.session_state.f_idx = 0
+if 'quiz_pool' not in st.session_state: st.session_state.quiz_pool = []
+if 'quiz_stats' not in st.session_state: st.session_state.quiz_stats = {'total': 0, 'correct': 0, 'is_school_quiz': False}
 
 # ==========================================
 # 2. 구글 시트 연결 및 데이터 준비
@@ -36,7 +39,7 @@ if 'f_idx' not in st.session_state: st.session_state.f_idx = 0
 conn = st.connection("gsheets", type=GSheetsConnection)
 try:
     df = conn.read(ttl=0)
-    required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일']
+    required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
     for col in required_cols:
         if col not in df.columns: df[col] = ""
         
@@ -49,7 +52,7 @@ except:
     st.stop()
 
 # ==========================================
-# 3. 사이드바 진도율 관리
+# 3. 사이드바 (레벨 및 진도)
 # ==========================================
 selected_level = st.sidebar.selectbox("🎯 학습 레벨 선택", ["중등", "고등"])
 level_df = df[df['레벨'] == selected_level]
@@ -63,28 +66,48 @@ st.sidebar.progress(progress)
 st.sidebar.write(f"{master_cnt} / {total_cnt} 완료")
 
 # ==========================================
-# 4. 5대 핵심 탭 구성 (학교/학원 깜빡이 추가 및 순서 조정)
+# 4. 5대 탭 구성
 # ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["👀 일반 깜빡이", "🏫 학교/학원 깜빡이", "🎯 실전 퀴즈", "➕ 단어 추가", "🔒 비밀의 방"])
 
-# --- 공통 함수: 깜빡이 UI ---
+# --- 공통 함수: 깜빡이 학습 ---
 def run_flashcard(target_list, mode_name):
     if st.session_state.test_active:
-        st.warning(f"⚠️ 시험 중에는 단어를 볼 수 없어요! 시험을 종료하거나 완료해주세요.")
+        st.warning(f"⚠️ 시험 중에는 단어를 볼 수 없어요!")
         return
+
+    if st.session_state.force_review and mode_name == "일반 단어":
+        st.error("🚨 이전 시험에서 80점 미만을 받았어요! 다시 철저하게 복습하세요! 🚨")
+
+    # 딱 30개 단위로 자르기
+    target_list = target_list.head(30)
 
     if target_list.empty:
         st.success(f"🎊 {mode_name}에 공부할 단어가 없어요!")
         return
 
-    # 순환 로직
-    row = target_list.iloc[st.session_state.f_idx % len(target_list)]
-    
+    # 30개(또는 남은 단어) 학습 완료 시 화면
+    if st.session_state.f_idx >= len(target_list):
+        st.session_state.force_review = False # 복습 완료시 족쇄 풀림
+        st.markdown(f"<div class='flashcard'><h2>🎉 {mode_name} {len(target_list)}개 학습 완료!</h2><p>목표량을 다 채웠어요! 이제 무엇을 할까요?</p></div>", unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 처음부터 반복 학습하기", key=f"replay_{mode_name}"):
+                st.session_state.f_idx = 0
+                st.rerun()
+        with col2:
+            if st.button("✍️ 실전 퀴즈 모드로 가기", key=f"go_quiz_{mode_name}"):
+                st.session_state.test_active = True
+                st.session_state.f_idx = 0
+                st.rerun()
+        return
+
+    row = target_list.iloc[st.session_state.f_idx]
     reg_date = datetime.strptime(str(row['등록일']), '%Y-%m-%d')
     is_recent = (datetime.today() - reg_date).days <= 7
     badge = "🔥 집중 복습!" if is_recent else "✨ 학습 중"
     
-    st.markdown(f"<div class='flashcard'><p style='color:red;'>{badge} [{mode_name}] ( {st.session_state.f_idx % len(target_list) + 1} / {len(target_list)} )</p><h1 style='font-size:70px;'>{row['영어']}</h1></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='flashcard'><p style='color:red;'>{badge} [{mode_name}] ( {st.session_state.f_idx + 1} / {len(target_list)} )</p><h1 style='font-size:70px;'>{row['영어']}</h1></div>", unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
     with c1:
@@ -92,15 +115,22 @@ def run_flashcard(target_list, mode_name):
             tts = gTTS(text=str(row['영어']), lang='en')
             fp = io.BytesIO(); tts.write_to_fp(fp); st.audio(fp, format='audio/mp3')
     with c2:
-        if st.button("💡 뜻 보기 / 가리기", key=f"toggle_{mode_name}"):
+        if st.button("💡 뜻 보기/가리기", key=f"toggle_{mode_name}"):
             st.session_state.show_meaning = not st.session_state.show_meaning
+
+    if st.button("📖 예문 보기/가리기", key=f"ex_btn_{mode_name}"):
+        st.session_state.show_example = not st.session_state.show_example
     
-    if st.session_state.show_meaning:
-        st.success(f"정답: {row['한글']}")
-    else: st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
+    if st.session_state.show_meaning: st.success(f"정답: {row['한글']}")
+    if st.session_state.show_example:
+        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다."
+        st.info(f"📝 예문: {ex_text}")
+    if not st.session_state.show_meaning and not st.session_state.show_example:
+        st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
     
     if st.button("➡️ 다음 단어로", key=f"next_{mode_name}"):
         st.session_state.show_meaning = False
+        st.session_state.show_example = False
         st.session_state.f_idx += 1
         st.rerun()
 
@@ -109,68 +139,121 @@ with tab1:
     general_unmastered = level_df[(level_df['상태'] < 4) & (level_df['학교학원'] != "O")].reset_index(drop=True)
     run_flashcard(general_unmastered, "일반 단어")
 
-# --- 탭 2: 학교/학원 깜빡이 (신설) ---
+# --- 탭 2: 학교/학원 깜빡이 ---
 with tab2:
     school_unmastered = level_df[(level_df['상태'] < 4) & (level_df['학교학원'] == "O")].reset_index(drop=True)
     run_flashcard(school_unmastered, "학교/학원")
 
-# --- 탭 3: 실전 퀴즈 (순서 이동) ---
+# --- 탭 3: 실전 퀴즈 (80점 미만 제재 + 오답 내일 출제 로직) ---
 with tab3:
     if not st.session_state.test_active:
-        if st.button("✍️ 시험 시작하기 (학습 탭 잠금)"):
-            st.session_state.test_active = True
-            st.rerun()
+        st.write("### 어떤 시험을 볼까요?")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✍️ 일반 단어 시험 시작"):
+                st.session_state.test_active = True
+                quiz_targets = general_unmastered.head(30)
+                st.session_state.quiz_pool = quiz_targets.to_dict('records')
+                random.shuffle(st.session_state.quiz_pool)
+                st.session_state.quiz_stats = {'total': len(quiz_targets), 'correct': 0, 'is_school_quiz': False}
+                st.session_state.q_done = False
+                st.rerun()
+        with c2:
+            if st.button("🏫 학교/학원 시험 시작"):
+                st.session_state.test_active = True
+                quiz_targets = school_unmastered.head(30)
+                st.session_state.quiz_pool = quiz_targets.to_dict('records')
+                random.shuffle(st.session_state.quiz_pool)
+                st.session_state.quiz_stats = {'total': len(quiz_targets), 'correct': 0, 'is_school_quiz': True}
+                st.session_state.q_done = False
+                st.rerun()
     
     if st.session_state.test_active:
-        test_targets = level_df[level_df['상태'] < 4]
-        if not test_targets.empty:
-            if 'q_word' not in st.session_state:
-                st.session_state.q_word = test_targets.sample(1).iloc[0]
-                st.session_state.q_done = False
-
-            q = st.session_state.q_word
-            st.markdown(f"<div class='flashcard'><h3>실전 퀴즈</h3><h1 style='font-size:60px;'>{q['영어']}</h1></div>", unsafe_allow_html=True)
+        if st.session_state.quiz_pool:
+            q = st.session_state.quiz_pool[0]
+            current_q_num = st.session_state.quiz_stats['total'] - len(st.session_state.quiz_pool) + 1
+            
+            st.markdown(f"<div class='flashcard'><h3>Q{current_q_num}. 뜻을 맞혀보세요!</h3><h1 style='font-size:60px;'>{q['영어']}</h1></div>", unsafe_allow_html=True)
             
             if not st.session_state.q_done:
                 ans = st.text_input("정답 입력", key=f"q_{q['영어']}").strip()
                 if st.button("정답 확인 🚀"):
                     st.session_state.q_done = True
-                    if ans == str(q['한글']).strip():
+                    raw_answer = str(q['한글'])
+                    correct_list = [c.strip() for c in raw_answer.replace('/', ',').split(',')]
+                    
+                    df_idx = df[df['영어'] == q['영어']].index[0]
+                    
+                    if ans in correct_list:
                         st.session_state.q_res = True
-                        df_idx = df[df['영어'] == q['영어']].index[0]
-                        df.at[df_idx, '상태'] += 1
+                        st.session_state.quiz_stats['correct'] += 1
+                        df.at[df_idx, '상태'] = int(df.at[df_idx, '상태']) + 1
                         df.at[df_idx, '최근학습일'] = today_str
-                        conn.update(data=df)
-                    else: st.session_state.q_res = False
+                    else: 
+                        st.session_state.q_res = False
+                        # 💥 틀린 문제는 상태 0으로 초기화하고, 등록일을 '오늘'로 바꿔서 내일 강제 복습!
+                        df.at[df_idx, '상태'] = 0
+                        df.at[df_idx, '등록일'] = today_str
+                        
+                    conn.update(data=df)
                     st.rerun()
             else:
-                if st.session_state.q_res: st.balloons(); st.success(f"정답: {q['한글']}")
-                else: st.error(f"오답! 정답은 '{q['한글']}'")
+                if st.session_state.q_res: 
+                    st.balloons(); st.success(f"🎉 정답이야! (등록된 뜻: {q['한글']})")
+                else: 
+                    st.error(f"오답! 정답은 '{q['한글']}' (이)야. (내일 복습에 자동 추가됨!)")
+                
                 if st.button("➡️ 다음 문제"):
-                    del st.session_state.q_word
+                    st.session_state.quiz_pool.pop(0)
+                    st.session_state.q_done = False
                     st.rerun()
             
-            if st.button("🏁 시험 종료"):
+            st.write("---")
+            if st.button("🏁 시험 강제 종료"):
                 st.session_state.test_active = False
+                st.session_state.quiz_pool = []
                 st.rerun()
-        else:
-            st.success("🎉 모든 시험을 마쳤습니다!")
-            st.session_state.test_active = False
+                
+        else: # 퀴즈 끝! 결과 판정
+            total = st.session_state.quiz_stats['total']
+            correct = st.session_state.quiz_stats['correct']
+            score = int((correct / total * 100)) if total > 0 else 0
+            
+            st.markdown(f"<div class='flashcard'><h2>🏁 시험 종료!</h2><h1>{score} 점</h1><p>{total}문제 중 {correct}문제 정답</p></div>", unsafe_allow_html=True)
+            
+            # 🚨 80점 미만일 때 강제 복습 로직 (일반 단어일 때만!)
+            if score < 80 and not st.session_state.quiz_stats['is_school_quiz']:
+                st.error("🚨 80점 미만이므로 [일반 깜빡이] 탭으로 돌아가 다시 복습해야 합니다!")
+                if st.button("😭 알겠습니다 (학습 탭으로 이동)"):
+                    st.session_state.force_review = True
+                    st.session_state.test_active = False
+                    st.session_state.f_idx = 0
+                    st.rerun()
+            else:
+                if score >= 80: st.success("🎉 80점 이상 통과! 참 잘했어요!")
+                else: st.info("학교/학원 단어 시험 수고했어요!")
+                
+                if st.button("🏠 메인으로 가기"):
+                    st.session_state.test_active = False
+                    st.rerun()
 
 # --- 탭 4: 단어 추가 ---
 with tab4:
     st.header("➕ 단어 추가 (SGE)")
     with st.form("new_add", clear_on_submit=True):
-        eng = st.text_input("영어 단어")
-        kor = st.text_input("한글 뜻")
+        eng = st.text_input("영어 단어 (필수)")
+        kor = st.text_input("한글 뜻 (여러 개일 경우 쉼표로 구분. 예: 사과, 사과하다)")
+        ex_sentence = st.text_area("예문 (선택 사항)")
         lv = st.radio("레벨", ["중등", "고등"], horizontal=True)
         is_school = st.checkbox("🏫 학교/학원 단어장용 (체크 시 전용 탭으로 분류)")
+        
         if st.form_submit_button("저장하기 💾"):
             if eng and kor:
-                new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": ""}])
+                new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
                 conn.update(data=pd.concat([df, new_row], ignore_index=True))
                 st.success("저장 완료!")
                 time.sleep(1); st.rerun()
+            else: st.warning("영어 단어와 한글 뜻은 꼭 적어주세요!")
 
 # --- 탭 5: 비밀의 방 ---
 with tab5:
@@ -197,6 +280,7 @@ with tab5:
             st.markdown(cal_html, unsafe_allow_html=True)
             
         with m_tab2:
+            st.dataframe(df)
             if st.button("💣 전체 데이터 초기화"):
                 conn.update(data=pd.DataFrame(columns=required_cols))
                 st.success("초기화 완료!"); st.rerun()
