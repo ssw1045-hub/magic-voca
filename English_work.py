@@ -24,9 +24,9 @@ st.markdown("""
 
 st.title("💖 영단어 암기 App(SGE)")
 
-# --- 상태 변수 (앱을 완전히 끄지 않는 한 유지됨) ---
+# --- 상태 변수 초기화 ---
 if 'test_active' not in st.session_state: st.session_state.test_active = False
-if 'force_review' not in st.session_state: st.session_state.force_review = False # 80점 미만 강제 복습
+if 'force_review' not in st.session_state: st.session_state.force_review = False
 if 'show_meaning' not in st.session_state: st.session_state.show_meaning = False
 if 'show_example' not in st.session_state: st.session_state.show_example = False
 if 'f_idx' not in st.session_state: st.session_state.f_idx = 0
@@ -34,25 +34,35 @@ if 'quiz_pool' not in st.session_state: st.session_state.quiz_pool = []
 if 'quiz_stats' not in st.session_state: st.session_state.quiz_stats = {'total': 0, 'correct': 0, 'is_school_quiz': False}
 
 # ==========================================
-# 2. 구글 시트 연결 및 데이터 준비
+# 2. 구글 시트 고속 메모리 연동 (오류 완벽 차단 기법)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
-try:
-    df = conn.read(ttl=0)
-    required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
-    for col in required_cols:
-        if col not in df.columns: df[col] = ""
+
+# 앱의 메모리(session_state)에 단어 데이터가 없을 때만 딱 한 번 구글에서 읽어옵니다.
+if 'main_df' not in st.session_state:
+    try:
+        loaded_df = conn.read(ttl=0)
+        required_cols = ['영어', '한글', '상태', '학교학원', '레벨', '등록일', '최근학습일', '예문']
+        for col in required_cols:
+            if col not in loaded_df.columns: loaded_df[col] = ""
+            
+        loaded_df['상태'] = pd.to_numeric(loaded_df['상태'], errors='coerce').fillna(0).astype(int)
+        today_str = datetime.today().strftime('%Y-%m-%d')
+        loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str)
+        loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등')
         
-    df['상태'] = pd.to_numeric(df['상태'], errors='coerce').fillna(0).astype(int)
-    today_str = datetime.today().strftime('%Y-%m-%d')
-    df['등록일'] = df['등록일'].fillna(today_str).replace("", today_str)
-    df['레벨'] = df['레벨'].fillna('중등').replace("", '중등')
-except:
-    st.error("🚨 시트 연결 실패! 설정을 확인해주세요.")
-    st.stop()
+        # 메모리에 안전하게 저장
+        st.session_state.main_df = loaded_df
+    except Exception as e:
+        st.error(f"🚨 구글 시트 연결에 실패했습니다. 인터넷 연결이나 시트 설정을 확인해주세요. (원인: {e})")
+        st.stop()
+
+# 이제 앱은 구글 서버를 매번 찌르지 않고 메모리에 저장된 데이터를 초고속으로 읽습니다.
+df = st.session_state.main_df
+today_str = datetime.today().strftime('%Y-%m-%d')
 
 # ==========================================
-# 3. 사이드바 (레벨 및 진도)
+# 3. 사이드바 (레벨, 진도 및 수동 동기화 버튼)
 # ==========================================
 selected_level = st.sidebar.selectbox("🎯 학습 레벨 선택", ["중등", "고등"])
 level_df = df[df['레벨'] == selected_level]
@@ -65,8 +75,14 @@ st.sidebar.write(f"### {selected_level} 마스터 진도")
 st.sidebar.progress(progress)
 st.sidebar.write(f"{master_cnt} / {total_cnt} 완료")
 
+st.sidebar.write("---")
+if st.sidebar.button("🔄 구글시트 강제 동기화", help="구글 시트에서 직접 단어를 수정했을 때 눌러주세요."):
+    if 'main_df' in st.session_state:
+        del st.session_state.main_df
+    st.rerun()
+
 # ==========================================
-# 4. 5대 탭 구성
+# 4. 5대 핵심 탭 구성
 # ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["👀 일반 깜빡이", "🏫 학교/학원 깜빡이", "🎯 실전 퀴즈", "➕ 단어 추가", "🔒 비밀의 방"])
 
@@ -79,16 +95,16 @@ def run_flashcard(target_list, mode_name):
     if st.session_state.force_review and mode_name == "일반 단어":
         st.error("🚨 이전 시험에서 80점 미만을 받았어요! 다시 철저하게 복습하세요! 🚨")
 
-    # 딱 30개 단위로 자르기
+    # 아빠의 기획: 딱 30개 단위로 끊어서 학습
     target_list = target_list.head(30)
 
     if target_list.empty:
         st.success(f"🎊 {mode_name}에 공부할 단어가 없어요!")
         return
 
-    # 30개(또는 남은 단어) 학습 완료 시 화면
+    # 학습 완료 안내 창
     if st.session_state.f_idx >= len(target_list):
-        st.session_state.force_review = False # 복습 완료시 족쇄 풀림
+        st.session_state.force_review = False
         st.markdown(f"<div class='flashcard'><h2>🎉 {mode_name} {len(target_list)}개 학습 완료!</h2><p>목표량을 다 채웠어요! 이제 무엇을 할까요?</p></div>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
@@ -144,7 +160,7 @@ with tab2:
     school_unmastered = level_df[(level_df['상태'] < 4) & (level_df['학교학원'] == "O")].reset_index(drop=True)
     run_flashcard(school_unmastered, "학교/학원")
 
-# --- 탭 3: 실전 퀴즈 (80점 미만 제재 + 오답 내일 출제 로직) ---
+# --- 탭 3: 실전 퀴즈 ---
 with tab3:
     if not st.session_state.test_active:
         st.write("### 어떤 시험을 볼까요?")
@@ -191,10 +207,11 @@ with tab3:
                         df.at[df_idx, '최근학습일'] = today_str
                     else: 
                         st.session_state.q_res = False
-                        # 💥 틀린 문제는 상태 0으로 초기화하고, 등록일을 '오늘'로 바꿔서 내일 강제 복습!
                         df.at[df_idx, '상태'] = 0
                         df.at[df_idx, '등록일'] = today_str
                         
+                    # 메모리와 구글시트를 동시에 업데이트
+                    st.session_state.main_df = df
                     conn.update(data=df)
                     st.rerun()
             else:
@@ -214,14 +231,13 @@ with tab3:
                 st.session_state.quiz_pool = []
                 st.rerun()
                 
-        else: # 퀴즈 끝! 결과 판정
+        else:
             total = st.session_state.quiz_stats['total']
             correct = st.session_state.quiz_stats['correct']
             score = int((correct / total * 100)) if total > 0 else 0
             
             st.markdown(f"<div class='flashcard'><h2>🏁 시험 종료!</h2><h1>{score} 점</h1><p>{total}문제 중 {correct}문제 정답</p></div>", unsafe_allow_html=True)
             
-            # 🚨 80점 미만일 때 강제 복습 로직 (일반 단어일 때만!)
             if score < 80 and not st.session_state.quiz_stats['is_school_quiz']:
                 st.error("🚨 80점 미만이므로 [일반 깜빡이] 탭으로 돌아가 다시 복습해야 합니다!")
                 if st.button("😭 알겠습니다 (학습 탭으로 이동)"):
@@ -250,7 +266,12 @@ with tab4:
         if st.form_submit_button("저장하기 💾"):
             if eng and kor:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
-                conn.update(data=pd.concat([df, new_row], ignore_index=True))
+                updated_df = pd.concat([df, new_row], ignore_index=True)
+                
+                # 메모리와 구글시트 동시 업데이트
+                st.session_state.main_df = updated_df
+                conn.update(data=updated_df)
+                
                 st.success("저장 완료!")
                 time.sleep(1); st.rerun()
             else: st.warning("영어 단어와 한글 뜻은 꼭 적어주세요!")
@@ -282,5 +303,7 @@ with tab5:
         with m_tab2:
             st.dataframe(df)
             if st.button("💣 전체 데이터 초기화"):
-                conn.update(data=pd.DataFrame(columns=required_cols))
+                empty_df = pd.DataFrame(columns=required_cols)
+                st.session_state.main_df = empty_df
+                conn.update(data=empty_df)
                 st.success("초기화 완료!"); st.rerun()
