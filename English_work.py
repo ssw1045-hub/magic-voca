@@ -18,7 +18,7 @@ except ImportError:
 # 🤖 AI 비서 API 키 영구 저장 (매우 중요 ⭐)
 # 아래 따옴표 안에 발급받으신 Gemini API 키를 붙여넣으세요!
 # ==========================================
-MY_GEMINI_API_KEY = "AIzaSyCxTCokinz9BfuJ-rOn1C5GOR42kcwxdSU"
+MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -67,10 +67,16 @@ if 'main_df' not in st.session_state:
         loaded_df = conn.read(ttl=0)
         for col in required_cols:
             if col not in loaded_df.columns: loaded_df[col] = ""
+            
+        # 💡 [V28 업데이트] 빈칸이라도 무조건 텍스트(문자열)로 강제 인식시킴
         loaded_df['상태'] = pd.to_numeric(loaded_df['상태'], errors='coerce').fillna(0).astype(int)
         today_str = datetime.today().strftime('%Y-%m-%d')
-        loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str)
-        loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등')
+        loaded_df['등록일'] = loaded_df['등록일'].fillna(today_str).replace("", today_str).astype(str)
+        loaded_df['레벨'] = loaded_df['레벨'].fillna('중등').replace("", '중등').astype(str)
+        loaded_df['예문'] = loaded_df['예문'].fillna("").astype(str)  # 강제 텍스트화 (에러 해결!)
+        loaded_df['한글'] = loaded_df['한글'].fillna("").astype(str)
+        loaded_df['최근학습일'] = loaded_df['최근학습일'].fillna("").astype(str)
+        
         st.session_state.main_df = loaded_df
     except Exception as e:
         st.error(f"🚨 구글 시트 연결 실패! (원인: {e})")
@@ -151,39 +157,35 @@ def run_flashcard(target_list, mode_name, limit):
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
     # ==============================================
-    # 🤖 [V27 업데이트] AI 모델 자동 스캔 및 예문 생성 로직
+    # 🤖 AI 예문 자동 생성 
     # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
-            if pd.isna(row['예문']) or str(row['예문']).strip() == "":
+            if pd.isna(row['예문']) or str(row['예문']).strip() == "" or str(row['예문']).strip() == "nan":
                 if HAS_GENAI and MY_GEMINI_API_KEY and MY_GEMINI_API_KEY != "여기에_아버님의_API키를_붙여넣으세요":
-                    with st.spinner("🤖 AI가 사용 가능한 모델을 찾아 예문을 만들고 있어요..."):
+                    with st.spinner("🤖 AI 비서가 예문을 영작 중입니다..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
                             
-                            # 1. 사용할 수 있는 모델 목록 강제 검색
                             valid_models = []
                             for m in genai.list_models():
                                 if 'generateContent' in m.supported_generation_methods:
                                     valid_models.append(m.name)
                             
                             if not valid_models:
-                                st.error("이 API 키로 사용할 수 있는 텍스트 생성 모델이 없습니다. 구글 정책을 확인해주세요.")
+                                st.error("이 API 키로 사용할 수 있는 텍스트 생성 모델이 없습니다.")
                             else:
-                                # 2. 가장 똑똑한 모델 우선순위로 선택
-                                target_model = valid_models[0] # 일단 첫 번째 모델 잡기
+                                target_model = valid_models[0]
                                 for v in valid_models:
                                     if 'flash' in v: target_model = v; break
                                     elif 'pro' in v: target_model = v
 
-                                # 3. 찾아낸 모델로 예문 생성 지시!
                                 model = genai.GenerativeModel(target_model)
                                 prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
                                 res = model.generate_content(prompt)
                                 
-                                # 구글 시트에 업데이트
                                 df_idx = df[df['영어'] == row['영어']].index[0]
                                 df.at[df_idx, '예문'] = res.text.strip()
                                 st.session_state.main_df = df
@@ -196,7 +198,7 @@ def run_flashcard(target_list, mode_name, limit):
 
     if st.session_state.show_meaning: st.success(f"정답: {row['한글']}")
     if st.session_state.show_example:
-        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다. (코드 상단에 API 키가 잘 입력되었는지 확인해주세요!)"
+        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" and str(row['예문']).strip() != "nan" else "등록된 예문이 없습니다. (코드 상단에 API 키가 잘 입력되었는지 확인해주세요!)"
         st.info(f"📝 예문: {ex_text}")
         
     if not st.session_state.show_meaning and not st.session_state.show_example: st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
