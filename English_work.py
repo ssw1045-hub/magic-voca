@@ -150,34 +150,53 @@ def run_flashcard(target_list, mode_name, limit):
     with c2:
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
-    # 🤖 AI 예문 자동 생성 로직
+    # ==============================================
+    # 🤖 [V27 업데이트] AI 모델 자동 스캔 및 예문 생성 로직
+    # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "":
-                # 코드가 가지고 있는 영구 API 키 사용
                 if HAS_GENAI and MY_GEMINI_API_KEY and MY_GEMINI_API_KEY != "여기에_아버님의_API키를_붙여넣으세요":
-                    with st.spinner("🤖 AI 비서가 고은이를 위해 예문을 만들고 있어요..."):
+                    with st.spinner("🤖 AI가 사용 가능한 모델을 찾아 예문을 만들고 있어요..."):
                         try:
                             genai.configure(api_key=MY_GEMINI_API_KEY)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
-                            res = model.generate_content(prompt)
                             
-                            df_idx = df[df['영어'] == row['영어']].index[0]
-                            df.at[df_idx, '예문'] = res.text.strip()
-                            st.session_state.main_df = df
-                            conn.update(data=df)
-                            st.rerun() 
+                            # 1. 사용할 수 있는 모델 목록 강제 검색
+                            valid_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    valid_models.append(m.name)
+                            
+                            if not valid_models:
+                                st.error("이 API 키로 사용할 수 있는 텍스트 생성 모델이 없습니다. 구글 정책을 확인해주세요.")
+                            else:
+                                # 2. 가장 똑똑한 모델 우선순위로 선택
+                                target_model = valid_models[0] # 일단 첫 번째 모델 잡기
+                                for v in valid_models:
+                                    if 'flash' in v: target_model = v; break
+                                    elif 'pro' in v: target_model = v
+
+                                # 3. 찾아낸 모델로 예문 생성 지시!
+                                model = genai.GenerativeModel(target_model)
+                                prompt = f"영단어 '{row['영어']}'(뜻: {row['한글']})가 포함된 중학생 1학년 수준의 아주 쉽고 짧은 영어 예문 1개와 한글 뜻을 만들어줘. 반드시 'I have an apple. (나는 사과를 가지고 있다.)' 처럼 딱 1줄로 대답해."
+                                res = model.generate_content(prompt)
+                                
+                                # 구글 시트에 업데이트
+                                df_idx = df[df['영어'] == row['영어']].index[0]
+                                df.at[df_idx, '예문'] = res.text.strip()
+                                st.session_state.main_df = df
+                                conn.update(data=df)
+                                st.rerun() 
                         except Exception as e:
-                            st.error(f"AI 예문 생성 실패! API 키를 확인해주세요. 에러: {e}")
+                            st.error(f"AI 예문 생성 실패! 에러: {e}")
                 else:
                     pass
 
     if st.session_state.show_meaning: st.success(f"정답: {row['한글']}")
     if st.session_state.show_example:
-        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다. (코드 맨 위에 API 키가 잘 입력되었는지 확인해주세요!)"
+        ex_text = row['예문'] if pd.notna(row['예문']) and str(row['예문']).strip() != "" else "등록된 예문이 없습니다. (코드 상단에 API 키가 잘 입력되었는지 확인해주세요!)"
         st.info(f"📝 예문: {ex_text}")
         
     if not st.session_state.show_meaning and not st.session_state.show_example: st.write("<div style='height: 58px;'></div>", unsafe_allow_html=True)
