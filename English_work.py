@@ -9,6 +9,23 @@ from datetime import datetime
 import calendar
 
 # ==========================================
+# 🎁 아빠의 룰렛 선물 10가지 기본 설정 (영구 저장용)
+# 여기서 선물을 수정해두시면 앱이 꺼졌다 켜져도 유지됩니다!
+# ==========================================
+default_prizes = [
+    "💸 용돈 3,000원", 
+    "🍦 베스킨라빈스 싱글", 
+    "🍗 아빠가 쏘는 치킨!",
+    "🎮 게임 1시간 이용권", 
+    "🎬 보고 싶은 영화 보기", 
+    "떡볶이 사먹기 찬스",
+    "마라탕 쏘기!", 
+    "원하는 간식 1개 고르기", 
+    "휴식권 30분", 
+    "아빠의 폭풍 칭찬 및 안마"
+]
+
+# ==========================================
 # 1. UI 설정 및 상태 관리 초기화
 # ==========================================
 st.set_page_config(page_title="영단어 암기 App(SGE)", layout="centered")
@@ -33,7 +50,8 @@ if 'show_example' not in st.session_state: st.session_state.show_example = False
 if 'f_idx' not in st.session_state: st.session_state.f_idx = 0
 if 'quiz_pool' not in st.session_state: st.session_state.quiz_pool = []
 if 'quiz_stats' not in st.session_state: st.session_state.quiz_stats = {'total': 0, 'correct': 0, 'is_school_quiz': False}
-if 'spin_tickets' not in st.session_state: st.session_state.spin_tickets = 0 # 🎟️ 룰렛 티켓
+if 'spin_tickets' not in st.session_state: st.session_state.spin_tickets = 0
+if 'prizes' not in st.session_state: st.session_state.prizes = default_prizes # 커스텀 선물 10종 로드
 
 # ==========================================
 # 2. 구글 시트 고속 메모리 연동
@@ -59,13 +77,16 @@ if 'main_df' not in st.session_state:
 df = st.session_state.main_df
 
 # ==========================================
-# 3. 달력 인지 알고리즘 (월말 총평가 감지)
+# 3. 달력 인지 (일요일 시작 알고리즘 + 월말 총평가)
 # ==========================================
 today_date = datetime.today()
 today_str = today_date.strftime('%Y-%m-%d')
-weekday = today_date.weekday()
-week_days = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
-today_name = week_days[weekday]
+
+# 파이썬 기본: 0=월, 1=화, ... 5=토, 6=일
+# 아빠의 규칙: 일=0, 월=1, ... 토=6 으로 변환
+custom_weekday = (today_date.weekday() + 1) % 7 
+week_days_custom = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"]
+today_name = week_days_custom[custom_weekday]
 
 last_day_of_month = calendar.monthrange(today_date.year, today_date.month)[1]
 is_last_day = (today_date.day == last_day_of_month)
@@ -80,11 +101,11 @@ progress = (master_cnt / total_cnt) if total_cnt > 0 else 0
 if is_last_day:
     study_limit = 9999 
     st.sidebar.error(f"🔥 오늘은 {today_date.month}월의 마지막 날!\n대망의 [월말 총평가] 날입니다. 90점 이상 받고 룰렛 티켓을 노려보세요!")
-elif weekday == 6:
+elif custom_weekday == 6: # 6 = 토요일 (총복습일)
     study_limit = 180
     st.sidebar.success(f"👑 오늘은 {today_name}!\n신규 진도 없이 이번 주 배운 단어 총복습 및 시험일입니다.")
-else:
-    study_limit = (weekday + 1) * 30
+else: # 0~5 = 일요일~금요일 (진도 나가는 날)
+    study_limit = (custom_weekday + 1) * 30
     st.sidebar.info(f"📅 오늘은 {today_name}!\n누적 {study_limit}개 단어 학습일입니다.")
 
 st.sidebar.write("---")
@@ -98,7 +119,7 @@ if st.sidebar.button("🔄 구글시트 강제 동기화"):
     st.rerun()
 
 # ==========================================
-# 4. 6대 탭 구성 (선물 룰렛 추가!)
+# 4. 6대 탭 구성
 # ==========================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👀 일반", "🏫 학교", "🎯 퀴즈", "🎁 룰렛", "➕ 추가", "🔒 비밀"])
 
@@ -208,19 +229,17 @@ with tab3:
             if st.button("🏁 시험 강제 종료"): st.session_state.test_active = False; st.session_state.quiz_pool = []; st.rerun()
                 
         else:
-            # 🏁 시험 결과 및 보상 판정 로직
             total = st.session_state.quiz_stats['total']
             correct = st.session_state.quiz_stats['correct']
             score = int((correct / total * 100)) if total > 0 else 0
             
             st.markdown(f"<div class='flashcard'><h2>🏁 시험 종료!</h2><h1>{score} 점</h1><p>{total}문제 중 {correct}문제 정답</p></div>", unsafe_allow_html=True)
             
-            # 월말 평가 (is_last_day) 보상 시스템
+            # 월말 평가 보상 시스템
             if is_last_day and not st.session_state.quiz_stats['is_school_quiz']:
                 if score >= 90:
                     st.success("🎉 [월말 평가] 90점 돌파!! 엄청난 실력이네요!")
                     st.info("🎁 선물 룰렛 티켓 1장을 획득했습니다! [🎁 룰렛] 탭으로 가서 돌려보세요!")
-                    # 시험이 끝날 때 딱 1번만 티켓을 주도록 처리
                     if 'reward_given' not in st.session_state:
                         st.session_state.spin_tickets += 1
                         st.session_state.reward_given = True
@@ -229,7 +248,6 @@ with tab3:
                 else:
                     st.error("🚨 [월말 평가] 80점 미만입니다. 다음 달 진급을 위해 다시 철저하게 복습하세요!")
             else:
-                # 일반 시험 (월말 아님)
                 if score < 80 and not st.session_state.quiz_stats['is_school_quiz']:
                     st.error("🚨 80점 미만이므로 [일반 깜빡이] 탭으로 돌아가 다시 복습해야 합니다!")
                     if st.button("😭 알겠습니다"):
@@ -238,31 +256,29 @@ with tab3:
 
             if st.button("🏠 메인으로 가기"):
                 st.session_state.test_active = False
-                if 'reward_given' in st.session_state: del st.session_state.reward_given # 다음 시험을 위해 보상 리셋
+                if 'reward_given' in st.session_state: del st.session_state.reward_given
                 st.rerun()
 
-# --- 탭 4: 🎁 보상 룰렛 (신설!) ---
+# --- 탭 4: 🎁 보상 룰렛 ---
 with tab4:
     st.header("🎁 고은이의 선물 룰렛")
     st.write(f"🎟️ **현재 보유한 티켓:** {st.session_state.spin_tickets}장")
     
-    # 아버님이 원하시는 선물들로 자유롭게 수정 가능합니다!
-    prizes = ["💸 용돈 3,000원", "🍦 베스킨라빈스 싱글", "🍗 아빠가 쏘는 치킨!", "🎮 게임 1시간 이용권", "🎬 보고 싶은 영화 보기", "떡볶이 찬스!"]
+    # 설정된 10개의 선물 리스트 가져오기
+    prizes = st.session_state.prizes 
     
     if st.session_state.spin_tickets > 0:
         if st.button("🎯 룰렛 돌리기 (티켓 1장 사용)", type="primary"):
             st.session_state.spin_tickets -= 1
             
-            # 룰렛 애니메이션 효과
             spin_placeholder = st.empty()
             for i in range(20):
                 random_prize = random.choice(prizes)
                 spin_placeholder.markdown(f"<div class='roulette-box'><h2 style='color:#bbb;'>두구두구두구...</h2><h1 style='font-size:50px;'>🎰 {random_prize}</h1></div>", unsafe_allow_html=True)
-                time.sleep(0.1) # 0.1초마다 글자가 바뀜
+                time.sleep(0.1)
                 
-            # 최종 당첨 결과
             final_prize = random.choice(prizes)
-            spin_placeholder.markdown(f"<div class='roulette-box'><h2 style='color:#FF4500;'>🎉 축하합니다! 당첨!! 🎉</h2><h1 style='font-size:60px;'>🎁 {final_prize}</h1><p>아빠한테 화면을 보여주고 선물을 받으세요!</p></div>", unsafe_allow_html=True)
+            spin_placeholder.markdown(f"<div class='roulette-box'><h2 style='color:#FF4500;'>🎉 축하합니다! 당첨!! 🎉</h2><h1 style='font-size:50px;'>🎁 {final_prize}</h1><p>아빠한테 화면을 보여주고 선물을 받으세요!</p></div>", unsafe_allow_html=True)
             st.balloons()
     else:
         st.info("💡 룰렛 티켓이 없습니다. 매월 마지막 날 '월말 평가'에서 90점 이상을 받으면 티켓을 얻을 수 있어요!")
@@ -278,11 +294,11 @@ with tab5:
                 new_row = pd.DataFrame([{"영어": eng, "한글": kor, "상태": 0, "학교학원": "O" if is_school else "X", "레벨": lv, "등록일": today_str, "최근학습일": "", "예문": ex_sentence}])
                 st.session_state.main_df = pd.concat([df, new_row], ignore_index=True); conn.update(data=st.session_state.main_df); st.success("저장 완료!"); time.sleep(1); st.rerun()
 
-# --- 탭 6: 비밀의 방 (티켓 조작 기능 추가) ---
+# --- 탭 6: 비밀의 방 (선물 설정 추가!) ---
 with tab6:
     if st.text_input("아빠 비밀번호", type="password") == "love317619":
         st.subheader("🔒 아빠의 관리소")
-        m_tab1, m_tab2, m_tab3 = st.tabs(["📅 학습 캘린더", "🧹 데이터 관리", "🎟️ 치트키(테스트)"])
+        m_tab1, m_tab2, m_tab3, m_tab4 = st.tabs(["📅 학습 캘린더", "🧹 데이터 관리", "🎟️ 치트키(테스트)", "🎁 선물 설정"])
         
         with m_tab1:
             studied_dates = set(df['최근학습일'].dropna().replace("", pd.NA).dropna().tolist())
@@ -303,11 +319,9 @@ with tab6:
             if not df.empty:
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    if st.button("🏫 학교단어 전체 삭제"):
-                        st.session_state.main_df = df[df['학교학원'] != "O"]; conn.update(data=st.session_state.main_df); st.rerun()
+                    if st.button("🏫 학교단어 전체 삭제"): st.session_state.main_df = df[df['학교학원'] != "O"]; conn.update(data=st.session_state.main_df); st.rerun()
                 with col_b:
-                    if st.button("👑 마스터 단어 삭제"):
-                        st.session_state.main_df = df[df['상태'] < 4]; conn.update(data=st.session_state.main_df); st.rerun()
+                    if st.button("👑 마스터 단어 삭제"): st.session_state.main_df = df[df['상태'] < 4]; conn.update(data=st.session_state.main_df); st.rerun()
                 
                 df_for_edit = df.copy(); df_for_edit.insert(0, "삭제선택", False)
                 edited_df = st.data_editor(df_for_edit, hide_index=True, use_container_width=True, column_config={"삭제선택": st.column_config.CheckboxColumn("삭제✅", default=False)})
@@ -315,11 +329,23 @@ with tab6:
                     words_to_del = edited_df[edited_df["삭제선택"] == True]["영어"].tolist()
                     if words_to_del: st.session_state.main_df = df[~df["영어"].isin(words_to_del)]; conn.update(data=st.session_state.main_df); st.rerun()
         
-        # 아빠의 치트키 탭 (테스트용)
         with m_tab3:
             st.write("### 🛠️ 시스템 테스트 및 보상 지급")
             st.write(f"현재 고은이의 룰렛 티켓: **{st.session_state.spin_tickets}장**")
             if st.button("🎟️ 고은이에게 티켓 1장 몰래 주기 (룰렛 테스트용)"):
                 st.session_state.spin_tickets += 1
-                st.success("티켓 1장이 지급되었습니다! [🎁 룰렛] 탭에서 확인해 보세요.")
-                time.sleep(1); st.rerun()
+                st.success("티켓 1장이 지급되었습니다! [🎁 룰렛] 탭에서 확인해 보세요."); time.sleep(1); st.rerun()
+                
+        # 🎁 대망의 10가지 룰렛 선물 직접 설정!
+        with m_tab4:
+            st.write("### 🎁 룰렛 당첨 선물 10개 커스텀 설정")
+            st.info("💡 이곳에서 입력 후 저장하시면 이번에 앱을 켜두는 동안 반영됩니다. 영구적으로 바꾸시려면 파이썬 코드 상단의 `default_prizes` 부분(13번째 줄)을 직접 수정해주세요!")
+            with st.form("prize_form"):
+                new_prizes = []
+                for i in range(10):
+                    new_val = st.text_input(f"선물 {i+1}번", value=st.session_state.prizes[i])
+                    new_prizes.append(new_val)
+                if st.form_submit_button("선물 10개 목록 업데이트! 💾"):
+                    st.session_state.prizes = new_prizes
+                    st.success("새로운 선물이 룰렛에 장전되었습니다!")
+                    time.sleep(1); st.rerun()
