@@ -20,7 +20,8 @@ except ImportError:
 try:
     MY_GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
-    MY_GEMINI_API_KEY = ""
+    # 혹시 비밀 금고 설정이 안 되어 있다면 아래 따옴표 안에 직접 키를 넣으셔도 작동합니다!
+    MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
@@ -30,7 +31,6 @@ default_prizes = [
     "🎮 인스타 10분 추가(1회)", "🎬 보고 싶은 드라마 1회", "용돈 5천원권",
     "엄카 1회 사용(만원이내)", "용돈 1000원권", "인스타 30분추가권(1회)", "아빠의 폭풍 칭찬 및 안마"
 ]
-
 # ==========================================
 # 1. UI 설정 및 상태 관리
 # ==========================================
@@ -169,15 +169,11 @@ def run_flashcard(target_list, mode_name, limit):
     with c2:
         if st.button("💡 뜻 보기/가리기", key=f"t_{mode_name}"): st.session_state.show_meaning = not st.session_state.show_meaning
 
-    # ==============================================
-    # 🤖 [V32] AI 예문 자동 생성 (자가 진단 기능 탑재)
-    # ==============================================
     if st.button("📖 예문 보기/가리기", key=f"e_{mode_name}"): 
         st.session_state.show_example = not st.session_state.show_example
         
         if st.session_state.show_example:
             if pd.isna(row['예문']) or str(row['예문']).strip() == "" or str(row['예문']).strip() == "nan":
-                # 💡 앱이 스스로 원인을 진단합니다!
                 if not HAS_GENAI:
                     st.error("🚨 AI 라이브러리가 설치되지 않았습니다! (requirements.txt 확인 필요)")
                 elif not MY_GEMINI_API_KEY:
@@ -249,9 +245,19 @@ with tab3:
                 ans = st.text_input("정답 입력").strip()
                 if st.button("정답 확인 🚀"):
                     st.session_state.q_done = True
-                    correct_list = [c.strip() for c in str(q['한글']).replace('/', ',').split(',')]
+                    
+                    # 💡 [V33 업데이트] 띄어쓰기 무시하고 정답 체크 로직
+                    # 사용자가 입력한 값에서 모든 공백(띄어쓰기)을 제거
+                    ans_clean = ans.replace(" ", "") 
+                    
+                    # 구글 시트에 등록된 정답 리스트에서도 모든 공백 제거
+                    raw_answer = str(q['한글'])
+                    correct_list_clean = [c.strip().replace(" ", "") for c in raw_answer.replace('/', ',').split(',')]
+                    
                     df_idx = df[df['영어'] == q['영어']].index[0]
-                    if ans in correct_list:
+                    
+                    # 공백이 모두 제거된 상태에서 비교
+                    if ans_clean in correct_list_clean:
                         st.session_state.q_res = True; st.session_state.quiz_stats['correct'] += 1
                         df.at[df_idx, '상태'] = int(df.at[df_idx, '상태']) + 1; df.at[df_idx, '최근학습일'] = today_str
                     else: 
