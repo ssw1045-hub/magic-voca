@@ -21,7 +21,7 @@ try:
     MY_GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
     # 혹시 비밀 금고 설정이 안 되어 있다면 아래 따옴표 안에 직접 키를 넣으셔도 작동합니다!
-    MY_GEMINI_API_KEY = "여기에_아버님의_API키를_붙여넣으세요"
+    MY_GEMINI_API_KEY = "AIzaSyBRZzz6Wtl01bkDpoFzqh3sRciXuwKVbJY"
 
 # ==========================================
 # 🎁 아빠의 룰렛 선물 10가지
